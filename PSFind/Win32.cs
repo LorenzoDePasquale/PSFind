@@ -66,29 +66,6 @@ namespace PSFind
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        internal struct READ_USN_JOURNAL_DATA
-        {
-            public long StartUsn;
-            public USN_REASON ReasonMask;
-            public uint ReturnOnlyOnClose;
-            public ulong Timeout;
-            public ulong BytesToWaitFor;
-            public ulong UsnJournalID;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct USN_JOURNAL_DATA
-        {
-            internal long UsnJournalID;
-            internal long FirstUsn;
-            internal long NextUsn;
-            internal long LowestValidUsn;
-            internal long MaxUsn;
-            internal long MaximumSize;
-            internal long AllocationDelta;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
         internal struct USN_RECORD
         {
             internal uint RecordLength;
