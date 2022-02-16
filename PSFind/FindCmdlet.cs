@@ -75,8 +75,11 @@ public class FindCmdlet : Cmdlet
 
                 foreach (var result in results)
                 {
-                    PrintWithColor(result, Name);
-                    Interlocked.Increment(ref found);
+                    lock(stopwatch)
+                    {
+                        PrintWithColor(result, Name);
+                        ++found;
+                    }
                 }
 
                 Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
