@@ -97,7 +97,15 @@ public class FindCmdlet : Cmdlet
                 {
                     lock(stopwatch)
                     {
-                        PrintWithColor(result, Name, Regex);
+                        if (Distance == 0)
+                        {
+                            WritePattern(result, Name, Regex);
+                        }
+                        else
+                        {
+                            WriteName(result, Name);
+                        }
+
                         ++found;
                     }
                 }
@@ -130,7 +138,7 @@ public class FindCmdlet : Cmdlet
                                                          where drive.IsReady && drive.DriveFormat == "NTFS"
                                                          select drive.Name[0];
 
-    public static void PrintWithColor(string path, string word, bool isRegex)
+    private static void WritePattern(string path, string word, bool isRegex)
     {
         string fileName = Path.GetFileName(path);
         int index = path.IndexOf(fileName);
@@ -221,6 +229,29 @@ public class FindCmdlet : Cmdlet
         }
     }
 
+    private static void WriteName(string path, string word)
+    {
+        string fileName = Path.GetFileName(path);
+        int index = path.IndexOf(fileName);
+        Console.Write(path[..index]);
+        
+        for (int i = 0; i < fileName.Length; i++)
+        {
+            if (fileName[i] == word[i])
+            {
+                Console.ForegroundColor = ConsoleColor.Blue;
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+            }
+
+            Console.Write(fileName[i]);
+        }
+
+        Console.ResetColor();
+        Console.WriteLine();
+    }
 
     class DriveArgumentCompleter : IArgumentCompleter
     {
