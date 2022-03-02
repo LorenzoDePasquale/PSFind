@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 
 namespace PSFind;
 
@@ -36,34 +35,10 @@ public class MFT_Searcher : IDisposable
         }
     }
 
-    public IEnumerable<string> Search(string fileName, bool folders = false)
-    {
-        string pattern = $"^{Regex.Escape(fileName).Replace(@"\*", ".*").Replace(@"\?", ".")}$";
-
-        return Search_Internal(pattern, folders);
-    }
-
-    public IEnumerable<string> SearchPattern(string pattern, bool folders = false) => Search_Internal(pattern, folders);
-
-    public void Dispose()
-    {
-        if (_volumeHandle != IntPtr.Zero && _volumeHandle != Win32.INVALID_HANDLE_VALUE)
-        {
-            Win32.CloseHandle(_volumeHandle);
-        }
-
-        // If dispose has already been called, there's no need to call the finalizer
-        GC.SuppressFinalize(this);
-    }
-
-
-    private IEnumerable<string> Search_Internal(string pattern, bool folders)
+    public IEnumerable<string> Search(Predicate<string> match, bool folders)
     {
         SearchedRecords = 0;
         FileAttributes searchAttribute = folders ? FileAttributes.Directory : 0;
-
-        // Regex is compiled since it will be reused many times
-        var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
         int bufferSize = 1024 * 1024; // 1MB - arbitrary value obtained from tests
 
@@ -106,7 +81,7 @@ public class MFT_Searcher : IDisposable
                         // FileNameLength is the length in bytes; since Unicode characters are 2 bytes each, it's necessary to divide by 2 to get the file name length
                         string name = Marshal.PtrToStringUni(new IntPtr(pUsnRecord.ToInt64() + usnRecord.FileNameOffset), usnRecord.FileNameLength / 2);
 
-                        if (regex.IsMatch(name))
+                        if (match(name))
                         {
                             yield return BuildPathFromMFT(usnRecord.FileReferenceNumber);
                         }
@@ -132,6 +107,17 @@ public class MFT_Searcher : IDisposable
 
         // Free unmanaged memory
         Marshal.FreeHGlobal(pBuffer);
+    }
+
+    public void Dispose()
+    {
+        if (_volumeHandle != IntPtr.Zero && _volumeHandle != Win32.INVALID_HANDLE_VALUE)
+        {
+            Win32.CloseHandle(_volumeHandle);
+        }
+
+        // If dispose has already been called, there's no need to call the finalizer
+        GC.SuppressFinalize(this);
     }
 
     // Recursively builds the full path for the file or directory associated with a given reference number, using the Master File Table
