@@ -8,35 +8,37 @@ using System.Security.Principal;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Diagnostics;
+using System.Text;
+using RegExpr = System.Text.RegularExpressions;
 
 namespace PSFind;
 
-[Cmdlet(VerbsCommon.Find, "File")]
+[Cmdlet(VerbsCommon.Find, "File", DefaultParameterSetName = "default")]
 [OutputType(typeof(string))]
 [Alias("find")]
 public class FindCmdlet : Cmdlet
 {
     [Parameter(Mandatory = true, Position = 0, HelpMessage = "Name of the file to search for. Supports the glob pattern.")]
-    [Alias("Pattern")]
     public string Name;
 
+    [Parameter(ParameterSetName = "regex", HelpMessage = "If specified, considers the name as a regex pattern")]
+    public SwitchParameter Regex;
+
     [Parameter(HelpMessage = "If specified, searches for folders instead of files")]
-    [Alias("Directory")]
-    public SwitchParameter Folder;
+    public SwitchParameter Folders;
 
     [Parameter(HelpMessage = "If specified, restricts the search to the volume with the given letter.")]
     [ArgumentCompleter(typeof(DriveArgumentCompleter))]
-    [Alias("Drive")]
     public char Volume;
 
-    [Parameter(HelpMessage = "If specified, the fileName is interpreted as a regex.")]
-    public SwitchParameter Regex;
+    [Parameter(ParameterSetName = "text", HelpMessage = "If specified, performs a fuzzy search using the Levenshtein distance, returning all files where the distance between the file name and the searched name is less or equal than the given max distance.")]
+    public byte Distance;
 
     [Parameter(HelpMessage = "If specified, search statistics are shown at the end of the operation")]
     public SwitchParameter Stats;
 
 
-    IEnumerable<char> _drives;
+    char[] _drives;
     bool _gotPrivileges;
     readonly Lock _lock = new();
 
@@ -45,12 +47,7 @@ public class FindCmdlet : Cmdlet
         if (IsAdmin())
         {
             _gotPrivileges = true;
-            _drives = GetValidDrives();
-
-            if (Volume != '\0')
-            {
-                _drives = _drives.Where(d => d == Volume);
-            }
+            _drives = Volume == '\0' ? GetValidDrives().ToArray() : GetValidDrives().Where(d => d == Volume).ToArray();
         }
         else
         {
@@ -67,36 +64,57 @@ public class FindCmdlet : Cmdlet
         }
 
         uint searchedRecords = 0;
-        int volumes = 0, found = 0;
+        int found = 0;
         long startTimestamp = Stopwatch.GetTimestamp();
 
         Parallel.ForEach(_drives, drive =>
         {
-            Interlocked.Increment(ref volumes);
-
             using var searcher = new MftSearcher(drive);
-            var results = Regex ? searcher.SearchPattern(Name, Folder) : searcher.Search(Name, Folder);
-            
+            Predicate<string> match;
+
+            if (Distance > 0)
+            {
+                match = s => LevenshteinDistance.GetDistance(s, Name) <= Distance;
+            }
+            else if (Regex)
+            {
+                var regex = new Regex(Name, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                match = s => regex.IsMatch(s);
+            }
+            else
+            {
+                string pattern = $"^{RegExpr.Regex.Escape(Name).Replace(@"\*", ".*").Replace(@"\?", ".")}$";
+                var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                match = s => regex.IsMatch(s);
+            }
+
+            var results = searcher.Search(match, Folders);
+
             lock (_lock)
             {
                 foreach (string result in results)
                 {
+                    if (Distance == 0)
+                    {
+                        WritePattern(result, Name, Regex);
+                    }
+                    else
+                    {
+                        WriteName(result, Name);
+                    }
 
-                    PrintWithColor(result, Name);
                     ++found;
                 }
             }
 
             Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
         });
-        
+
         if (Stats)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-            Console.WriteLine($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
+            Console.WriteLine($"\nSearched {searchedRecords} records on {_drives.Length} volume{(_drives.Length != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
                               $" Found {found} result{(found != 1 ? "s" : "")}");
-            WriteVerbose($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
-                         $" Found {found} result{(found != 1 ? "s" : "")}");
         }
     }
 
@@ -109,11 +127,9 @@ public class FindCmdlet : Cmdlet
     }
 
     // Returns a list of all internal volumes in this machine that use the NTFS filesystem.
-    static IEnumerable<char> GetValidDrives() => from drive in DriveInfo.GetDrives()
-                                                 where drive.IsReady && drive.DriveFormat == "NTFS"
-                                                 select drive.Name[0];
+    static IEnumerable<char> GetValidDrives() => DriveInfo.GetDrives().Where(d => d is { IsReady: true, DriveFormat: "NTFS" }).Select(d => d.Name[0]);
 
-    static void PrintWithColor(string path, string word)
+    static void WritePattern(string path, string word, bool isRegex)
     {
         string fileName = Path.GetFileName(path);
         int index = path.IndexOf(fileName);
@@ -122,11 +138,17 @@ public class FindCmdlet : Cmdlet
         // Build a bitmask indicating where a char-by-char match is present; those letters will be colored differently in the output
         bool[] mask = new bool[fileName.Length];
 
-        // Generate a regex that finds all locations in the fileName where there's a char-by-char match, and mark those locations in the mask
+        // Generate a regex that finds all locations in the fileName where there's a char-by-char match, and marks those locations in the mask
         word = AddCaptureGroups(word);
 
+        // If word is not a regex, it could contain some special regex characters that need to be escaped
+        if (!isRegex)
+        {
+            word = RegExpr.Regex.Escape(word);
+        }
+
         // Convert AddCaptureGroups symbols to parenthesis (they can't be returned directly by that method because the would get escaped by Regex.Escape)
-        string r = $"^{System.Text.RegularExpressions.Regex.Escape(word).Replace("<", "(").Replace(">", ")").Replace(@"\*", ".*").Replace(@"\?", ".")}$";
+        string r = $"{word.Replace("<", "(").Replace(">", ")").Replace(@"\*", ".*").Replace(@"\?", ".")}";
         var regex = new Regex(r, RegexOptions.IgnoreCase);
 
         // Skip the first capture group since it contains the entire file name
@@ -146,50 +168,37 @@ public class FindCmdlet : Cmdlet
 
         Console.ResetColor();
         Console.WriteLine();
-
-
+        
         static string AddCaptureGroups(string pattern)
         {
-            string output = "";
-
-            for (int i = 0; i < pattern.Length; i++)
+            return pattern.Aggregate(new StringBuilder(), (result, c) => result.Append(c switch
             {
-                if (pattern[i] == '*' || pattern[i] == '?')
-                {
-                    if (i == 0)
-                    {
-                        output += pattern[i] + "<";
-                    }
-                    else if (i == pattern.Length - 1)
-                    {
-                        output += ">" + pattern[i];
-                    }
-                    else
-                    {
-                        output += ">" + pattern[i] + "<";
-                    }
-                }
-                else
-                {
-                    if (i == 0)
-                    {
-                        output += "<" + pattern[i];
-                    }
-                    else if (i == pattern.Length - 1)
-                    {
-                        output += pattern[i] + ">";
-                    }
-                    else
-                    {
-                        output += pattern[i];
-                    }
-                }
-            }
-
-            return output;
+                '*' or '?' when result.Length == 0                  => c + "<",
+                '*' or '?' when result.Length == pattern.Length - 1 => ">" + c,
+                '*' or '?'                                          => ">" + c + "<",
+                _ when result.Length == 0                           => "<" + c,
+                _ when result.Length == pattern.Length - 1          => c + ">",
+                _                                                   => c
+            })).ToString();
         }
     }
 
+    static void WriteName(string path, string word)
+    {
+        string fileName = Path.GetFileName(path);
+        int index = path.IndexOf(fileName);
+        Console.Write(path[..index]);
+        
+        for (int i = 0; i < fileName.Length; i++)
+        {
+            Console.ForegroundColor = fileName[i] == word[i] ? ConsoleColor.Blue : ConsoleColor.Yellow;
+            Console.Write(fileName[i]);
+        }
+
+        Console.ResetColor();
+        Console.WriteLine();
+    }
+    
 
     class DriveArgumentCompleter : IArgumentCompleter
     {

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using Windows.Wdk.Storage.FileSystem;
 using Windows.Win32;
 using Windows.Win32.Storage.FileSystem;
@@ -47,22 +46,17 @@ class MftSearcher : IDisposable
         }
     }
 
-    public List<string> Search(string fileName, bool folders = false) => SearchInternal($"^{Regex.Escape(fileName).Replace(@"\*", ".*").Replace(@"\?", ".")}$", folders);
-
-    public List<string> SearchPattern(string pattern, bool folders = false) => SearchInternal(pattern, folders);
-
     public void Dispose()
     {
         _volumeHandle.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    unsafe List<string> SearchInternal(string pattern, bool folders)
+    public unsafe List<string> Search(Predicate<string> predicate, bool folders)
     {
         List<string> results = [];
         SearchedRecords = 0;
         var searchAttribute = folders ? FileAttributes.Directory : 0;
-        Regex regex = new(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
         const int BUFFER_SIZE = 1024 * 1024; // 1MB - arbitrary value obtained from tests
         IntPtr pBuffer = Marshal.AllocHGlobal(BUFFER_SIZE);
 
@@ -100,7 +94,7 @@ class MftSearcher : IDisposable
                         // FileNameLength is the length in bytes; since Unicode characters are 2 bytes each, it's necessary to divide by 2 to get the file name length
                         string name = Marshal.PtrToStringUni(pUsnRecord + usnRecord.FileNameOffset, usnRecord.FileNameLength / 2);
 
-                        if (regex.IsMatch(name))
+                        if (predicate(name))
                         {
                             results.Add(BuildPathFromMft(usnRecord.FileReferenceNumber));
                         }
