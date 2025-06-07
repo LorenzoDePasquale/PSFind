@@ -1,0 +1,5 @@
+﻿CreateFile
+DeviceIoControl
+FSCTL_ENUM_USN_DATA
+USN_RECORD
+MFT_ENUM_DATA_V0

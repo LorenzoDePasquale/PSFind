@@ -38,6 +38,7 @@ public class FindCmdlet : Cmdlet
 
     IEnumerable<char> _drives;
     bool _gotPrivileges;
+    readonly Lock _lock = new();
 
     protected override void BeginProcessing()
     {
@@ -60,57 +61,59 @@ public class FindCmdlet : Cmdlet
 
     protected override void ProcessRecord()
     {
-        if (_gotPrivileges)
+        if (!_gotPrivileges)
         {
-            uint searchedRecords = 0;
-            int volumes = 0, found = 0;
-            var stopwatch = Stopwatch.StartNew();
+            return;
+        }
 
-            Parallel.ForEach(_drives, drive =>
+        uint searchedRecords = 0;
+        int volumes = 0, found = 0;
+        long startTimestamp = Stopwatch.GetTimestamp();
+
+        Parallel.ForEach(_drives, drive =>
+        {
+            Interlocked.Increment(ref volumes);
+
+            using var searcher = new MftSearcher(drive);
+            var results = Regex ? searcher.SearchPattern(Name, Folder) : searcher.Search(Name, Folder);
+            
+            lock (_lock)
             {
-                Interlocked.Increment(ref volumes);
-
-                using var searcher = new MFT_Searcher(drive);
-                var results = Regex ? searcher.SearchPattern(Name, Folder) : searcher.Search(Name, Folder);
-
-                foreach (var result in results)
+                foreach (string result in results)
                 {
-                    lock(stopwatch)
-                    {
-                        PrintWithColor(result, Name);
-                        ++found;
-                    }
+
+                    PrintWithColor(result, Name);
+                    ++found;
                 }
-
-                Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
-            });
-
-            stopwatch.Stop();
-
-            if (Stats)
-            {
-                Console.WriteLine($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {stopwatch.Elapsed.TotalSeconds:0.##}s." +
-                                  $" Found {found} result{(found != 1 ? "s" : "")}");
-                WriteVerbose($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {stopwatch.Elapsed.TotalSeconds:0.##}s." +
-                                  $" Found {found} result{(found != 1 ? "s" : "")}");
             }
+
+            Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
+        });
+        
+        if (Stats)
+        {
+            var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+            Console.WriteLine($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
+                              $" Found {found} result{(found != 1 ? "s" : "")}");
+            WriteVerbose($"\nSearched {searchedRecords} records on {volumes} volume{(volumes != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
+                         $" Found {found} result{(found != 1 ? "s" : "")}");
         }
     }
 
-    private static bool IsAdmin()
+    static bool IsAdmin()
     {
-        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        using var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
 
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 
     // Returns a list of all internal volumes in this machine that use the NTFS filesystem.
-    private static IEnumerable<char> GetValidDrives() => from drive in DriveInfo.GetDrives()
-                                                         where drive.IsReady && drive.DriveFormat == "NTFS"
-                                                         select drive.Name[0];
+    static IEnumerable<char> GetValidDrives() => from drive in DriveInfo.GetDrives()
+                                                 where drive.IsReady && drive.DriveFormat == "NTFS"
+                                                 select drive.Name[0];
 
-    private static void PrintWithColor(string path, string word)
+    static void PrintWithColor(string path, string word)
     {
         string fileName = Path.GetFileName(path);
         int index = path.IndexOf(fileName);
@@ -126,7 +129,7 @@ public class FindCmdlet : Cmdlet
         string r = $"^{System.Text.RegularExpressions.Regex.Escape(word).Replace("<", "(").Replace(">", ")").Replace(@"\*", ".*").Replace(@"\?", ".")}$";
         var regex = new Regex(r, RegexOptions.IgnoreCase);
 
-        // Skip first capture group since it contains the entire file name
+        // Skip the first capture group since it contains the entire file name
         foreach (var group in regex.Match(fileName).Groups.Values.Skip(1))
         {
             for (int i = group.Index; i < group.Index + group.Length; i++)
@@ -137,15 +140,7 @@ public class FindCmdlet : Cmdlet
 
         for (int i = 0; i < fileName.Length; i++)
         {
-            if (mask[i])
-            {
-                Console.ForegroundColor = ConsoleColor.Blue;
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-            }
-
+            Console.ForegroundColor = mask[i] ? ConsoleColor.Blue : ConsoleColor.Yellow;
             Console.Write(fileName[i]);
         }
 
