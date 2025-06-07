@@ -8,8 +8,8 @@ public static class LevenshteinDistance
     {
         // Implementation of the "Iterative with two matrix rows" algorithm on https://en.wikipedia.org/wiki/Levenshtein_distance
 
-        int[] v0 = new int[b.Length + 1];
-        int[] v1 = new int[b.Length + 1];
+        Span<int> v0 = stackalloc int[b.Length + 1];
+        Span<int> v1 = stackalloc int[b.Length + 1];
 
         for (int i = 0; i < b.Length; i++)
         {
@@ -29,7 +29,7 @@ public static class LevenshteinDistance
                 v1[j + 1] = Min(deletionCost, insertionCost, substitutionCost);
             }
 
-            Array.Copy(v1, v0, v0.Length);
+            v1.CopyTo(v0);
         }
 
         return v0[^2];
