@@ -36,8 +36,7 @@ public class FindCmdlet : Cmdlet
 
     [Parameter(HelpMessage = "If specified, search statistics are shown at the end of the operation")]
     public SwitchParameter Stats;
-
-
+    
     char[] _drives;
     bool _gotPrivileges;
     readonly Lock _lock = new();
@@ -66,29 +65,12 @@ public class FindCmdlet : Cmdlet
         uint searchedRecords = 0;
         int found = 0;
         long startTimestamp = Stopwatch.GetTimestamp();
+        Predicate<string> match = CreateMatchPredicate();
 
         Parallel.ForEach(_drives, drive =>
         {
-            using var searcher = new MftSearcher(drive);
-            Predicate<string> match;
-
-            if (Distance > 0)
-            {
-                match = s => LevenshteinDistance.GetDistance(s, Name) <= Distance;
-            }
-            else if (Regex)
-            {
-                var regex = new Regex(Name, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-                match = s => regex.IsMatch(s);
-            }
-            else
-            {
-                string pattern = $"^{RegExpr.Regex.Escape(Name).Replace(@"\*", ".*").Replace(@"\?", ".")}$";
-                var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-                match = s => regex.IsMatch(s);
-            }
-
-            var results = searcher.Search(match, Folders);
+            using MftSearcher searcher = new(drive);
+            List<string> results = searcher.Search(match, Folders);
 
             lock (_lock)
             {
@@ -116,6 +98,28 @@ public class FindCmdlet : Cmdlet
             Console.WriteLine($"\nSearched {searchedRecords} records on {_drives.Length} volume{(_drives.Length != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
                               $" Found {found} result{(found != 1 ? "s" : "")}");
         }
+    }
+
+    Predicate<string> CreateMatchPredicate()
+    {
+        Predicate<string> match;
+        if (Distance > 0)
+        {
+            match = s => LevenshteinDistance.GetDistance(s, Name) <= Distance;
+        }
+        else if (Regex)
+        {
+            var regex = new Regex(Name, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            match = s => regex.IsMatch(s);
+        }
+        else
+        {
+            string pattern = $"^{RegExpr.Regex.Escape(Name).Replace(@"\*", ".*").Replace(@"\?", ".")}$";
+            var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            match = s => regex.IsMatch(s);
+        }
+
+        return match;
     }
 
     static bool IsAdmin()
@@ -168,19 +172,19 @@ public class FindCmdlet : Cmdlet
 
         Console.ResetColor();
         Console.WriteLine();
-        
-        static string AddCaptureGroups(string pattern)
+    }
+
+    static string AddCaptureGroups(string pattern)
+    {
+        return pattern.Aggregate(new StringBuilder(), (result, c) => result.Append(c switch
         {
-            return pattern.Aggregate(new StringBuilder(), (result, c) => result.Append(c switch
-            {
-                '*' or '?' when result.Length == 0                  => c + "<",
-                '*' or '?' when result.Length == pattern.Length - 1 => ">" + c,
-                '*' or '?'                                          => ">" + c + "<",
-                _ when result.Length == 0                           => "<" + c,
-                _ when result.Length == pattern.Length - 1          => c + ">",
-                _                                                   => c
-            })).ToString();
-        }
+            '*' or '?' when result.Length == 0                  => c + "<",
+            '*' or '?' when result.Length == pattern.Length - 1 => ">" + c,
+            '*' or '?'                                          => ">" + c + "<",
+            _ when result.Length == 0                           => "<" + c,
+            _ when result.Length == pattern.Length - 1          => c + ">",
+            _                                                   => c
+        })).ToString();
     }
 
     static void WriteName(string path, string word)
