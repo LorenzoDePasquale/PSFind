@@ -72,13 +72,16 @@ public class FindCmdlet : Cmdlet
 
             foreach (string result in searcher.Search(match, Folders))
             {
-                if (Distance == 0)
+                lock (_drives)
                 {
-                    WritePattern(result, Name, Regex);
-                }
-                else
-                {
-                    WriteName(result, Name);
+                    if (Distance == 0)
+                    {
+                        WritePattern(result, Name, Regex);
+                    }
+                    else
+                    {
+                        WriteName(result, Name);
+                    }
                 }
 
                 Interlocked.Increment(ref found);
@@ -148,7 +151,7 @@ public class FindCmdlet : Cmdlet
             word = RegExpr.Regex.Escape(word);
         }
 
-        // Convert AddCaptureGroups symbols to parenthesis (they can't be returned directly by that method because the would get escaped by Regex.Escape)
+        // Convert AddCaptureGroups symbols to parenthesis (they can't be returned directly by that method because they would get escaped by Regex.Escape)
         string r = $"{word.Replace("<", "(").Replace(">", ")").Replace(@"\*", ".*").Replace(@"\?", ".")}";
         var regex = new Regex(r, RegexOptions.IgnoreCase);
 
@@ -173,14 +176,16 @@ public class FindCmdlet : Cmdlet
 
     static string AddCaptureGroups(string pattern)
     {
+        int index = 0;
+
         return pattern.Aggregate(new StringBuilder(), (result, c) => result.Append(c switch
         {
-            '*' or '?' when result.Length == 0                  => c + "<",
-            '*' or '?' when result.Length == pattern.Length - 1 => ">" + c,
-            '*' or '?'                                          => ">" + c + "<",
-            _ when result.Length == 0                           => "<" + c,
-            _ when result.Length == pattern.Length - 1          => c + ">",
-            _                                                   => c
+            '*' or '?' when index++ == 0            => c + "<",
+            '*' or '?' when index == pattern.Length => ">" + c, // Check should be with pattern.Length - 1, but index has been incremented by the previous condition
+            '*' or '?'                              => ">" + c + "<",
+            _ when index++ == 0                     => "<" + c,
+            _ when index == pattern.Length          => c + ">", // Check should be with pattern.Length - 1, but index has been incremented by the previous condition
+            _                                       => c
         })).ToString();
     }
 
