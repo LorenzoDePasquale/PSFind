@@ -33,10 +33,10 @@ class MftSearcher : IDisposable
     {
         _volumeLetter = volumeLetter;
         _volumeHandle = PInvoke.CreateFile($@"\\.\{_volumeLetter}:",
-                                         (uint)FileAccess.Read, 
-                                         FILE_SHARE_MODE.FILE_SHARE_READ | FILE_SHARE_MODE.FILE_SHARE_WRITE, 
-                                         null, 
-                                         FILE_CREATION_DISPOSITION.OPEN_EXISTING, 
+                                         (uint)FileAccess.Read,
+                                         FILE_SHARE_MODE.FILE_SHARE_READ | FILE_SHARE_MODE.FILE_SHARE_WRITE,
+                                         null,
+                                         FILE_CREATION_DISPOSITION.OPEN_EXISTING,
                                          FILE_FLAGS_AND_ATTRIBUTES.SECURITY_ANONYMOUS,
                                          new SafeFileHandle());
 
@@ -52,9 +52,8 @@ class MftSearcher : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    public unsafe List<string> Search(Predicate<string> predicate, bool folders)
+    public IEnumerable<string> Search(Predicate<string> predicate, bool folders)
     {
-        List<string> results = [];
         SearchedRecords = 0;
         var searchAttribute = folders ? FileAttributes.Directory : 0;
         const int BUFFER_SIZE = 1024 * 1024; // 1MB - arbitrary value obtained from tests
@@ -68,15 +67,21 @@ class MftSearcher : IDisposable
             HighUsn = long.MaxValue
         };
 
-        uint mftEnumDataSize = (uint)Marshal.SizeOf(mftEnumData);
-        uint bytesReturned;
-
-        // Returned data won't fit inside the initial buffer, so it's necessary to make many calls to get all data
-        // The do-while loop goes on until no more data is returned
-        do
+        try
         {
-            if (PInvoke.DeviceIoControl(_volumeHandle, PInvoke.FSCTL_ENUM_USN_DATA, &mftEnumData, mftEnumDataSize, pBuffer.ToPointer(), BUFFER_SIZE, &bytesReturned, null))
+            uint bytesReturned;
+
+            // Returned data won't fit inside the initial buffer, so it's necessary to make many calls to get all data
+            // The do-while loop goes on until no more data is returned
+            do
             {
+                bytesReturned = ReadUsnDataIntoBuffer(pBuffer, BUFFER_SIZE, mftEnumData);
+
+                if (bytesReturned == 0)
+                {
+                    break;
+                }
+
                 // Keep track of the position in the buffer
                 uint bytesToRead = bytesReturned;
                 // Get a pointer to the first record, which is right after the USN number
@@ -96,7 +101,7 @@ class MftSearcher : IDisposable
 
                         if (predicate(name))
                         {
-                            results.Add(BuildPathFromMft(usnRecord.FileReferenceNumber));
+                            yield return BuildPathFromMft(usnRecord.FileReferenceNumber);
                         }
                     }
 
@@ -109,17 +114,26 @@ class MftSearcher : IDisposable
 
                 // The first 8 bytes are always the next USN.
                 mftEnumData.StartFileReferenceNumber = (ulong)Marshal.ReadInt64(pBuffer);
-            }
-            else
-            {
-                break;
-            }
+            } while (bytesReturned > USN_SIZE);
         }
-        while (bytesReturned > USN_SIZE);
+        finally
+        {
+            Marshal.FreeHGlobal(pBuffer);
+        }
+    }
 
-        Marshal.FreeHGlobal(pBuffer);
-
-        return results;
+    unsafe uint ReadUsnDataIntoBuffer(IntPtr pBuffer, int bufferSize, MFT_ENUM_DATA_V0 mftEnumData)
+    {
+        uint bytesReturned;
+        PInvoke.DeviceIoControl(_volumeHandle,
+                                PInvoke.FSCTL_ENUM_USN_DATA,
+                                &mftEnumData,
+                                (uint)Marshal.SizeOf(mftEnumData),
+                                pBuffer.ToPointer(),
+                                (uint)bufferSize,
+                                &bytesReturned,
+                                null);
+        return bytesReturned;
     }
 
     // Recursively builds the full path for the file or directory associated with a given reference number, using the Master File Table
@@ -154,8 +168,8 @@ class MftSearcher : IDisposable
                                 BUFFER_SIZE,
                                 &bytesReturned,
                                 null);
-  
-        // Get a USN record structure from the span; the first 8 bytes are the next USN number
+
+        // The first 8 bytes in the buffer are the next USN number. The first returned USN_RECORD is next
         IntPtr pUsnRecord = new(buffer + USN_SIZE);
         var usnRecord = Marshal.PtrToStructure<USN_RECORD>(pUsnRecord);
         // Decode file name bytes as a Unicode string

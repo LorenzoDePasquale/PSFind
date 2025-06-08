@@ -13,7 +13,7 @@ using RegExpr = System.Text.RegularExpressions;
 
 namespace PSFind;
 
-[Cmdlet(VerbsCommon.Find, "File", DefaultParameterSetName = "default")]
+[Cmdlet(VerbsCommon.Find, "Files", DefaultParameterSetName = "default")]
 [OutputType(typeof(string))]
 [Alias("find")]
 public class FindCmdlet : Cmdlet
@@ -36,10 +36,9 @@ public class FindCmdlet : Cmdlet
 
     [Parameter(HelpMessage = "If specified, search statistics are shown at the end of the operation")]
     public SwitchParameter Stats;
-    
+
     char[] _drives;
     bool _gotPrivileges;
-    readonly Lock _lock = new();
 
     protected override void BeginProcessing()
     {
@@ -64,37 +63,34 @@ public class FindCmdlet : Cmdlet
 
         uint searchedRecords = 0;
         int found = 0;
-        long startTimestamp = Stopwatch.GetTimestamp();
         Predicate<string> match = CreateMatchPredicate();
+        long startTimestamp = Stopwatch.GetTimestamp();
 
         Parallel.ForEach(_drives, drive =>
         {
             using MftSearcher searcher = new(drive);
-            List<string> results = searcher.Search(match, Folders);
 
-            lock (_lock)
+            foreach (string result in searcher.Search(match, Folders))
             {
-                foreach (string result in results)
+                if (Distance == 0)
                 {
-                    if (Distance == 0)
-                    {
-                        WritePattern(result, Name, Regex);
-                    }
-                    else
-                    {
-                        WriteName(result, Name);
-                    }
-
-                    ++found;
+                    WritePattern(result, Name, Regex);
                 }
+                else
+                {
+                    WriteName(result, Name);
+                }
+
+                Interlocked.Increment(ref found);
             }
 
             Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
         });
 
+        var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+
         if (Stats)
         {
-            var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
             Console.WriteLine($"\nSearched {searchedRecords} records on {_drives.Length} volume{(_drives.Length != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
                               $" Found {found} result{(found != 1 ? "s" : "")}");
         }
@@ -103,19 +99,20 @@ public class FindCmdlet : Cmdlet
     Predicate<string> CreateMatchPredicate()
     {
         Predicate<string> match;
+
         if (Distance > 0)
         {
             match = s => LevenshteinDistance.GetDistance(s, Name) <= Distance;
         }
         else if (Regex)
         {
-            var regex = new Regex(Name, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            Regex regex = new(Name, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
             match = s => regex.IsMatch(s);
         }
         else
         {
             string pattern = $"^{RegExpr.Regex.Escape(Name).Replace(@"\*", ".*").Replace(@"\?", ".")}$";
-            var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            Regex regex = new(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
             match = s => regex.IsMatch(s);
         }
 
@@ -192,7 +189,7 @@ public class FindCmdlet : Cmdlet
         string fileName = Path.GetFileName(path);
         int index = path.IndexOf(fileName);
         Console.Write(path[..index]);
-        
+
         for (int i = 0; i < fileName.Length; i++)
         {
             Console.ForegroundColor = fileName[i] == word[i] ? ConsoleColor.Blue : ConsoleColor.Yellow;
@@ -202,7 +199,7 @@ public class FindCmdlet : Cmdlet
         Console.ResetColor();
         Console.WriteLine();
     }
-    
+
 
     class DriveArgumentCompleter : IArgumentCompleter
     {
