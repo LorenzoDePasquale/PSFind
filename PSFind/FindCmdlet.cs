@@ -34,8 +34,8 @@ public class FindCmdlet : Cmdlet
     [Parameter(ParameterSetName = "text", HelpMessage = "If specified, performs a fuzzy search using the Levenshtein distance, returning all files where the distance between the file name and the searched name is less or equal than the given max distance.")]
     public byte Distance;
 
-    [Parameter(HelpMessage = "If specified, search statistics are shown at the end of the operation")]
-    public SwitchParameter Stats;
+    [Parameter(HelpMessage = "If specified, search statistics are not shown at the end of the operation. Specify this parameter if you want to pipe results to another command.")]
+    public SwitchParameter NoStats;
 
     char[] _drives;
     bool _gotPrivileges;
@@ -92,7 +92,7 @@ public class FindCmdlet : Cmdlet
 
         var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
 
-        if (Stats)
+        if (!NoStats)
         {
             Console.WriteLine($"\nSearched {searchedRecords} records on {_drives.Length} volume{(_drives.Length != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
                               $" Found {found} result{(found != 1 ? "s" : "")}");
