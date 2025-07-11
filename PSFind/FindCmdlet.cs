@@ -19,7 +19,7 @@ namespace PSFind;
 public class FindCmdlet : Cmdlet
 {
     [Parameter(Mandatory = true, Position = 0, HelpMessage = "Name of the file to search for. Supports the glob pattern.")]
-    public string Name;
+    public required string Name;
 
     [Parameter(ParameterSetName = "regex", HelpMessage = "If specified, considers the name as a regex pattern")]
     public SwitchParameter Regex;
@@ -37,7 +37,7 @@ public class FindCmdlet : Cmdlet
     [Parameter(HelpMessage = "If specified, search statistics are not shown at the end of the operation. Specify this parameter if you want to pipe results to another command.")]
     public SwitchParameter NoStats;
 
-    char[] _drives;
+    char[] _drives = [];
     bool _gotPrivileges;
 
     protected override void BeginProcessing()
