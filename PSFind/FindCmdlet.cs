@@ -40,6 +40,9 @@ public class FindCmdlet : Cmdlet
     char[] _drives = [];
     bool _gotPrivileges;
 
+    const string HYPERLINK_START = "\e]8;;file://";
+    const string HYPERLINK_END = "\e]8;;\a";
+
     protected override void BeginProcessing()
     {
         if (IsAdmin())
@@ -136,7 +139,12 @@ public class FindCmdlet : Cmdlet
     static void WritePattern(string path, string word, bool isRegex)
     {
         string fileName = Path.GetFileName(path);
-        int index = path.IndexOf(fileName);
+        int index = path.IndexOf(fileName, StringComparison.Ordinal);
+        Console.Write(HYPERLINK_START);
+        // Write the full path as the link destination
+        Console.Write(path.Replace("\\", "/"));
+        Console.Write("\a");
+        // Write the directory part
         Console.Write(path[..index]);
 
         // Build a bitmask indicating where a char-by-char match is present; those letters will be colored differently in the output
@@ -170,6 +178,7 @@ public class FindCmdlet : Cmdlet
             Console.Write(fileName[i]);
         }
 
+        Console.Write(HYPERLINK_END);
         Console.ResetColor();
         Console.WriteLine();
     }
@@ -192,15 +201,22 @@ public class FindCmdlet : Cmdlet
     static void WriteName(string path, string word)
     {
         string fileName = Path.GetFileName(path);
-        int index = path.IndexOf(fileName);
+        int index = path.IndexOf(fileName, StringComparison.Ordinal);
+        Console.Write(HYPERLINK_START);
+        // Write the full path as the link destination
+        Console.Write(path.Replace("\\", "/"));
+        Console.Write("\a");
+        // Write the directory part
         Console.Write(path[..index]);
 
+        // Write filename with colored characters
         for (int i = 0; i < fileName.Length; i++)
         {
             Console.ForegroundColor = fileName[i] == word[i] ? ConsoleColor.Blue : ConsoleColor.Yellow;
             Console.Write(fileName[i]);
         }
 
+        Console.Write(HYPERLINK_END);
         Console.ResetColor();
         Console.WriteLine();
     }
