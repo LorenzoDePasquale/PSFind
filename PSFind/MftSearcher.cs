@@ -55,7 +55,6 @@ class MftSearcher : IDisposable
     public IEnumerable<string> Search(Predicate<string> predicate, bool folders)
     {
         SearchedRecords = 0;
-        var searchAttribute = folders ? FileAttributes.Directory : 0;
         const int BUFFER_SIZE = 1024 * 1024; // 1MB - arbitrary value obtained from tests
         IntPtr pBuffer = Marshal.AllocHGlobal(BUFFER_SIZE);
 
@@ -90,9 +89,10 @@ class MftSearcher : IDisposable
                 while (bytesToRead > USN_SIZE)
                 {
                     var usnRecord = Marshal.PtrToStructure<USN_RECORD>(pUsnRecord);
+                    bool isDirectory = (usnRecord.FileAttributes & (uint)FileAttributes.Directory) != 0;
 
                     // Filter out files or directories
-                    if ((usnRecord.FileAttributes & (uint)FileAttributes.Directory) == (uint)searchAttribute)
+                    if (isDirectory == folders)
                     {
                         // Get fileName of current record.
                         // The file name is not in a fixed position, so it's necessary to use the FileNameOffset and the buffer position to locate it
