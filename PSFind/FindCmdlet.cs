@@ -232,7 +232,15 @@ public class FindCmdlet : Cmdlet
         // Write filename with colored characters
         for (int i = 0; i < fileName.Length; i++)
         {
-            Console.ForegroundColor = fileName[i] == word[i] ? ConsoleColor.Blue : ConsoleColor.Yellow;
+            if (i < word.Length && fileName[i] == word[i])
+            {
+                Console.ForegroundColor = ConsoleColor.Blue;
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+            }
+
             Console.Write(fileName[i]);
         }
 
