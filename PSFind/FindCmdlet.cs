@@ -69,29 +69,37 @@ public class FindCmdlet : Cmdlet
         Predicate<string> match = CreateMatchPredicate();
         long startTimestamp = Stopwatch.GetTimestamp();
 
-        Parallel.ForEach(_drives, drive =>
+        if (_drives.Length == 1)
         {
-            using MftSearcher searcher = new(drive);
+            using MftSearcher searcher = new(_drives[0]);
 
             foreach (string result in searcher.Search(match, Folders))
             {
-                lock (_drives)
-                {
-                    if (Distance == 0)
-                    {
-                        WritePattern(result, Name, Regex);
-                    }
-                    else
-                    {
-                        WriteName(result, Name);
-                    }
-                }
-
-                Interlocked.Increment(ref found);
+                WriteSearchResult(result);
+                found++;
             }
 
-            Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
-        });
+            searchedRecords += searcher.SearchedRecords;
+        }
+        else
+        {
+            Parallel.ForEach(_drives, drive =>
+            {
+                using MftSearcher searcher = new(drive);
+
+                foreach (string result in searcher.Search(match, Folders))
+                {
+                    lock (_drives)
+                    {
+                        WriteSearchResult(result);
+                    }
+
+                    Interlocked.Increment(ref found);
+                }
+
+                Interlocked.Add(ref searchedRecords, searcher.SearchedRecords);
+            });
+        }
 
         var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
 
@@ -99,6 +107,18 @@ public class FindCmdlet : Cmdlet
         {
             Console.WriteLine($"\nSearched {searchedRecords} records on {_drives.Length} volume{(_drives.Length != 1 ? "s" : "")} in {elapsed.TotalSeconds:0.##}s." +
                               $" Found {found} result{(found != 1 ? "s" : "")}");
+        }
+    }
+
+    void WriteSearchResult(string result)
+    {
+        if (Distance == 0)
+        {
+            WritePattern(result, Name, Regex);
+        }
+        else
+        {
+            WriteName(result, Name);
         }
     }
 
