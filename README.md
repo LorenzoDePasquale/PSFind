@@ -42,14 +42,14 @@ The cmdlet can also be called using the shorter alias `powershell find`
 
 ### Parameters
 
-| Parameter  | Type   | Required | Description                                                                          |
-|------------|--------|----------|--------------------------------------------------------------------------------------|
-| `Name`     | String | Yes      | Name pattern to search for. Supports glob patterns (`*`, `?`)                        |
-| `Regex`    | Switch | No       | Treat the Name parameter as a regular expression                                     |
-| `Folders`  | Switch | No       | Search for folders instead of files                                                  |
-| `Volume`   | Char   | No       | Restrict search to a specific drive letter (e.g., 'C'). Supports tab auto-completion |
-| `Distance` | Byte   | No       | Enable fuzzy search with Levenshtein distance                                        |
-| `NoStats`  | Switch | No       | Suppress search statistics (useful for piping)                                       |
+| Parameter    | Type   | Required | Description                                                                              |
+|--------------|--------|----------|------------------------------------------------------------------------------------------|
+| `Name`       | String | Yes      | Name pattern to search for. Supports glob patterns (`*`, `?`)                            |
+| `Regex`      | Switch | No       | Treat the Name parameter as a regular expression                                         |
+| `Folders`    | Switch | No       | Search for folders instead of files                                                      |
+| `Volume`     | Char   | No       | Restrict search to a specific drive letter (e.g., 'C'). Supports tab auto-completion     |
+| `Distance`   | Byte   | No       | Enable fuzzy search with the specified Levenshtein distance                              |
+| `PipeOutput` | Switch | No       | Writes search results as raw strings to allow piping output to other Powershell commands |
 
 
 ## Examples
@@ -102,4 +102,11 @@ find *.dll -Volume C
 
 # Search for folders on D: drive
 find *backup* -Folders -Volume D
+```
+
+### Piping output to other commands
+
+```powershell
+# Find files with names similar to "config" (distance of 2)
+find *.txt -PipeOutput | Select-Object -First 10
 ```
