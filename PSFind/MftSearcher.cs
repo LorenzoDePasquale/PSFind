@@ -56,7 +56,7 @@ class MftSearcher : IDisposable
     {
         SearchedRecords = 0;
         const int BUFFER_SIZE = 1024 * 1024; // 1MB - arbitrary value obtained from tests
-        IntPtr pBuffer = Marshal.AllocHGlobal(BUFFER_SIZE);
+        nint pBuffer = Marshal.AllocHGlobal(BUFFER_SIZE);
 
         // Specify parameters for reading the MFT
         var mftEnumData = new MFT_ENUM_DATA_V0
@@ -70,11 +70,11 @@ class MftSearcher : IDisposable
         {
             uint bytesReturned;
 
-            // Returned data won't fit inside the initial buffer, so it's necessary to make many calls to get all data
+            // Returned data won't fit inside the initial buffer, so it's necessary to make many calls to get all the data
             // The do-while loop goes on until no more data is returned
             do
             {
-                bytesReturned = ReadUsnDataIntoBuffer(pBuffer, BUFFER_SIZE, mftEnumData);
+                bytesReturned = ReadUsnDataIntoBuffer(pBuffer, BUFFER_SIZE, in mftEnumData);
 
                 if (bytesReturned == 0)
                 {
@@ -114,7 +114,8 @@ class MftSearcher : IDisposable
 
                 // The first 8 bytes are always the next USN.
                 mftEnumData.StartFileReferenceNumber = (ulong)Marshal.ReadInt64(pBuffer);
-            } while (bytesReturned > USN_SIZE);
+            }
+            while (bytesReturned > USN_SIZE);
         }
         finally
         {
@@ -122,17 +123,18 @@ class MftSearcher : IDisposable
         }
     }
 
-    unsafe uint ReadUsnDataIntoBuffer(IntPtr pBuffer, int bufferSize, MFT_ENUM_DATA_V0 mftEnumData)
+    unsafe uint ReadUsnDataIntoBuffer(nint pBuffer, int bufferSize, in MFT_ENUM_DATA_V0 mftEnumData)
     {
-        uint bytesReturned;
+        var inBuffer = MemoryMarshal.CreateReadOnlySpan(in mftEnumData, 1);
+        var outBuffer = new Span<byte>(pBuffer.ToPointer(), bufferSize);
+
         PInvoke.DeviceIoControl(_volumeHandle,
                                 PInvoke.FSCTL_ENUM_USN_DATA,
-                                &mftEnumData,
-                                (uint)Marshal.SizeOf(mftEnumData),
-                                pBuffer.ToPointer(),
-                                (uint)bufferSize,
-                                &bytesReturned,
+                                MemoryMarshal.AsBytes(inBuffer),
+                                outBuffer,
+                                out uint bytesReturned,
                                 null);
+
         return bytesReturned;
     }
 
@@ -153,27 +155,24 @@ class MftSearcher : IDisposable
             LowUsn = 0,
             HighUsn = long.MaxValue
         };
-        uint mftEnumDataSize = (uint)Marshal.SizeOf(mftEnumData);
+        ReadOnlySpan<byte> inBuffer = new(&mftEnumData, Marshal.SizeOf(mftEnumData));
 
         // Buffer exact size can't be computed since the USN_RECORD size is variable (it depends on how long the file name is), but 512 bytes should be more than enough
-        const int BUFFER_SIZE = 512;
-        byte* buffer = stackalloc byte[BUFFER_SIZE];
-        uint bytesReturned;
+        Span<byte> outBuffer = stackalloc byte[512];
 
         PInvoke.DeviceIoControl(_volumeHandle,
                                 PInvoke.FSCTL_ENUM_USN_DATA,
-                                &mftEnumData,
-                                mftEnumDataSize,
-                                buffer,
-                                BUFFER_SIZE,
-                                &bytesReturned,
+                                inBuffer,
+                                outBuffer,
                                 null);
 
         // The first 8 bytes in the buffer are the next USN number. The first returned USN_RECORD is next
-        IntPtr pUsnRecord = new(buffer + USN_SIZE);
-        var usnRecord = Marshal.PtrToStructure<USN_RECORD>(pUsnRecord);
+        var usnRecordBytes = outBuffer[USN_SIZE..];
+        var usnRecord = MemoryMarshal.Read<USN_RECORD>(usnRecordBytes);
+
         // Decode file name bytes as a Unicode string
-        string name = Marshal.PtrToStringUni(pUsnRecord + usnRecord.FileNameOffset, usnRecord.FileNameLength / 2);
+        var nameBytes = usnRecordBytes.Slice(usnRecord.FileNameOffset, usnRecord.FileNameLength / 2);
+        string name = new(MemoryMarshal.Cast<byte, char>(nameBytes));
 
         if (usnRecord.FileReferenceNumber == referenceNumber)
         {
